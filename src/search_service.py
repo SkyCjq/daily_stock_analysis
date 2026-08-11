@@ -450,7 +450,7 @@ class TavilySearchProvider(BaseSearchProvider):
             # 执行搜索（优化：使用advanced深度、限制最近几天）
             search_kwargs: Dict[str, Any] = {
                 "query": query,
-                "search_depth": "advanced",  # advanced 获取更多结果
+                "search_depth": "basic",  # advanced 改为执行搜索：使用 basic 深度以降低 Tavily credits 消耗：sky
                 "max_results": max_results,
                 "include_answer": False,
                 "include_raw_content": False,
