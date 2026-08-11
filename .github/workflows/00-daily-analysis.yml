@@ -271,7 +271,7 @@ jobs:
           # ==========================================
           # 数据源
           # ==========================================
-          # 加入Finnhub
+          # 加入Finnhub：sky
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           # Tushare Pro 自定义接入地址（可选；指向自建网关或第三方兼容镜像时设置）
