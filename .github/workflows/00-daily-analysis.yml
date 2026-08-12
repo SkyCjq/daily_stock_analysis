@@ -55,7 +55,18 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           python -c "import futu; print('✅ futu SDK import OK')"
-      
+
+          # Backblaze B2 使用 S3-Compatible API。
+          # GitHub Hosted Runner 通常已预装 AWS CLI；
+          # 如果未来 runner 镜像没有，则自动安装。
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "ℹ️ 未检测到 AWS CLI，开始安装..."
+            pip install awscli
+          fi
+
+          echo "✅ AWS CLI:"
+          aws --version
+
       - name: 创建必要目录
         run: |
           mkdir -p data logs reports
