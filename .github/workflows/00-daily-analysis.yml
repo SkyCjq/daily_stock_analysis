@@ -663,6 +663,8 @@ jobs:
           echo "🎯 运行模式: $MODE"
           echo "📊 自选股: $STOCK_LIST"
           echo "📝 报告类型: $REPORT_TYPE"
+          echo "🌍 大盘复盘区域: ${MARKET_REVIEW_REGION:-未设置}"
+          echo "🔔 单股独立推送: ${SINGLE_STOCK_NOTIFY:-false}"
           echo ""
           echo "=========================================="
           echo "📋 配置检查"
