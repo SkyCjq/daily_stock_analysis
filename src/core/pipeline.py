@@ -3652,6 +3652,21 @@ class StockAnalysisPipeline:
                             channel_success,
                             channel_error,
                         )
+                    elif channel == NotificationChannel.DINGTALK:
+                        def _send_dingtalk_report() -> bool:
+                            dingtalk_content = strip_hidden_markdown_metadata(report).strip()
+                            return self.notifier.send_to_dingtalk(dingtalk_content)
+
+                        channel_success, channel_error = _send_channel_safely(
+                            channel.value,
+                            _send_dingtalk_report,
+                        )
+                        non_wechat_success = channel_success or non_wechat_success
+                        _record_channel_result(
+                            channel.value,
+                            channel_success,
+                            channel_error,
+                        )
                     elif channel == NotificationChannel.TELEGRAM:
                         def _send_telegram_report() -> bool:
                             use_image = self.notifier._should_use_image_for_channel(
