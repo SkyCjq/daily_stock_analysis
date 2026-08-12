@@ -70,9 +70,202 @@ jobs:
       - name: 创建必要目录
         run: |
           mkdir -p data logs reports
-      
+      # ============================================================
+      # Backblaze B2：恢复上一轮 DSA SQLite 历史数据库
+      # ============================================================
+      - name: 从 Backblaze B2 恢复历史数据库
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET_NAME: ${{ vars.B2_BUCKET_NAME }}
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          B2_DB_KEY: ${{ vars.B2_DB_KEY || 'dsa/database/stock_analysis.db' }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "🗄️ Backblaze B2 数据库恢复"
+          echo "=========================================="
+
+          # ----------------------------------------------------------
+          # 1. 检查 GitHub Secrets / Variables 是否完整
+          # ----------------------------------------------------------
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+            echo "❌ 缺少 GitHub Secret: B2_KEY_ID"
+            exit 1
+          fi
+
+          if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "❌ 缺少 GitHub Secret: B2_APPLICATION_KEY"
+            exit 1
+          fi
+
+          if [ -z "${B2_BUCKET_NAME:-}" ]; then
+            echo "❌ 缺少 GitHub Variable: B2_BUCKET_NAME"
+            exit 1
+          fi
+
+          if [ -z "${B2_S3_ENDPOINT:-}" ]; then
+            echo "❌ 缺少 GitHub Variable: B2_S3_ENDPOINT"
+            exit 1
+          fi
+
+          if [ -z "${B2_DB_KEY:-}" ]; then
+            echo "❌ 缺少 GitHub Variable: B2_DB_KEY"
+            exit 1
+          fi
+
+          # ----------------------------------------------------------
+          # 2. 从 Endpoint 自动提取 Backblaze Region
+          #
+          # 示例：
+          # https://s3.us-west-004.backblazeb2.com
+          #             ↓
+          # us-west-004
+          # ----------------------------------------------------------
+          B2_REGION="${B2_S3_ENDPOINT#https://s3.}"
+          B2_REGION="${B2_REGION%%.backblazeb2.com*}"
+
+          if [ -z "$B2_REGION" ] || [ "$B2_REGION" = "$B2_S3_ENDPOINT" ]; then
+            echo "❌ 无法从 B2_S3_ENDPOINT 解析 Region:"
+            echo "   ${B2_S3_ENDPOINT}"
+            echo "正确格式示例:"
+            echo "   https://s3.us-west-004.backblazeb2.com"
+            exit 1
+          fi
+
+          export AWS_DEFAULT_REGION="$B2_REGION"
+          export AWS_REGION="$B2_REGION"
+
+          echo "✅ B2 Bucket: ${B2_BUCKET_NAME}"
+          echo "✅ B2 Region: ${B2_REGION}"
+          echo "✅ DB Object: ${B2_DB_KEY}"
+
+          # ----------------------------------------------------------
+          # 3. 检查远端数据库对象是否存在
+          #
+          # 0   = 已存在
+          # 404 = 第一次运行，允许创建新数据库
+          # 403 / 凭据错误 / Endpoint 错误 = 立即失败
+          #
+          # 不能把 B2 连接失败误认为“第一次运行”，否则 DSA 会
+          # 从空数据库开始并在结束后覆盖原来的历史。
+          # ----------------------------------------------------------
+          set +e
+
+          HEAD_OUTPUT="$(
+            aws s3api head-object \
+              --bucket "${B2_BUCKET_NAME}" \
+              --key "${B2_DB_KEY}" \
+              --endpoint-url "${B2_S3_ENDPOINT}" \
+              2>&1
+          )"
+
+          HEAD_STATUS=$?
+
+          set -e
+
+          if [ "$HEAD_STATUS" -eq 0 ]; then
+            echo "✅ B2 中发现历史数据库"
+
+            # 清理当前 runner 中可能存在的 SQLite 文件
+            rm -f \
+              data/stock_analysis.db \
+              data/stock_analysis.db-wal \
+              data/stock_analysis.db-shm \
+              data/stock_analysis.restore.tmp
+
+            echo "⬇️ 开始下载历史数据库..."
+
+            # 先下载到临时文件，不直接覆盖正式 DB
+            aws s3 cp \
+              "s3://${B2_BUCKET_NAME}/${B2_DB_KEY}" \
+              "data/stock_analysis.restore.tmp" \
+              --endpoint-url "${B2_S3_ENDPOINT}" \
+              --only-show-errors
+
+            echo "🔍 检查下载后的 SQLite 完整性..."
+
+            python - <<'PY'
+          import os
+          import sqlite3
+          import sys
+
+          db_path = "data/stock_analysis.restore.tmp"
+
+          if not os.path.exists(db_path):
+              print("❌ B2 数据库下载文件不存在")
+              sys.exit(1)
+
+          if os.path.getsize(db_path) == 0:
+              print("❌ B2 数据库文件大小为 0")
+              sys.exit(1)
+
+          try:
+              conn = sqlite3.connect(db_path, timeout=30)
+              result = conn.execute("PRAGMA integrity_check;").fetchone()
+              conn.close()
+          except Exception as exc:
+              print(f"❌ 无法打开 B2 SQLite 数据库: {exc}")
+              sys.exit(1)
+
+          if not result or result[0] != "ok":
+              print(f"❌ SQLite integrity_check 失败: {result}")
+              sys.exit(1)
+
+          size_mb = os.path.getsize(db_path) / 1024 / 1024
+
+          print("✅ SQLite integrity_check: ok")
+          print(f"✅ 数据库大小: {size_mb:.2f} MB")
+          PY
+
+            # 只有完整性检查通过后才成为正式数据库
+            mv \
+              data/stock_analysis.restore.tmp \
+              data/stock_analysis.db
+
+            echo "✅ 历史数据库恢复完成"
+
+          else
+            # 判断是不是真的“对象不存在”
+            if echo "$HEAD_OUTPUT" | grep -Eqi \
+              '404|Not Found|NoSuchKey|NoSuchObject'; then
+
+              echo "ℹ️ B2 中暂时没有历史数据库"
+              echo "ℹ️ 如果这是第一次启用 B2，这是正常现象"
+              echo "ℹ️ 本次 DSA 将自动创建新的 SQLite 数据库"
+
+              rm -f \
+                data/stock_analysis.db \
+                data/stock_analysis.db-wal \
+                data/stock_analysis.db-shm \
+                data/stock_analysis.restore.tmp
+
+            else
+              echo "❌ 无法访问 Backblaze B2 数据库"
+              echo ""
+              echo "AWS CLI 返回:"
+              echo "$HEAD_OUTPUT"
+              echo ""
+              echo "为防止从空数据库运行并覆盖历史，本次 workflow 终止。"
+              exit 1
+            fi
+          fi
+
+          echo "=========================================="
+          
       - name: 执行股票分析
         env:
+          # ==========================================
+          # 数据库 / 历史回测
+          # ==========================================
+          DATABASE_PATH: ./data/stock_analysis.db
+          SQLITE_WAL_ENABLED: 'true'
+          BACKTEST_ENABLED: 'true'
+          BACKTEST_EVAL_WINDOW_DAYS: '10'
+          BACKTEST_MIN_AGE_DAYS: '14'
+          BACKTEST_ENGINE_VERSION: 'v1'
+          BACKTEST_NEUTRAL_BAND_PCT: '2.0'
           # ==========================================
           # AI 配置
           # ==========================================
@@ -547,6 +740,213 @@ jobs:
           else
             python main.py $FORCE_RUN_ARG
           fi
+
+      # ============================================================
+      # Backblaze B2：保存本次更新后的 SQLite 历史数据库
+      # ============================================================
+      - name: 保存历史数据库到 Backblaze B2
+        if: success()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET_NAME: ${{ vars.B2_BUCKET_NAME }}
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          B2_DB_KEY: ${{ vars.B2_DB_KEY || 'dsa/database/stock_analysis.db' }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "💾 Backblaze B2 数据库持久化"
+          echo "=========================================="
+
+          # ----------------------------------------------------------
+          # 1. 基本参数检查
+          # ----------------------------------------------------------
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+            echo "❌ 缺少 GitHub Secret: B2_KEY_ID"
+            exit 1
+          fi
+
+          if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "❌ 缺少 GitHub Secret: B2_APPLICATION_KEY"
+            exit 1
+          fi
+
+          if [ -z "${B2_BUCKET_NAME:-}" ]; then
+            echo "❌ 缺少 GitHub Variable: B2_BUCKET_NAME"
+            exit 1
+          fi
+
+          if [ -z "${B2_S3_ENDPOINT:-}" ]; then
+            echo "❌ 缺少 GitHub Variable: B2_S3_ENDPOINT"
+            exit 1
+          fi
+
+          if [ -z "${B2_DB_KEY:-}" ]; then
+            echo "❌ 缺少 GitHub Variable: B2_DB_KEY"
+            exit 1
+          fi
+
+          if [ ! -f "data/stock_analysis.db" ]; then
+            echo "❌ DSA 未生成 data/stock_analysis.db"
+            echo "为避免覆盖远端历史数据库，本次不执行 B2 上传。"
+            exit 1
+          fi
+
+          # ----------------------------------------------------------
+          # 2. 自动提取 B2 Region
+          # ----------------------------------------------------------
+          B2_REGION="${B2_S3_ENDPOINT#https://s3.}"
+          B2_REGION="${B2_REGION%%.backblazeb2.com*}"
+
+          if [ -z "$B2_REGION" ] || [ "$B2_REGION" = "$B2_S3_ENDPOINT" ]; then
+            echo "❌ 无法从 B2_S3_ENDPOINT 解析 Region"
+            exit 1
+          fi
+
+          export AWS_DEFAULT_REGION="$B2_REGION"
+          export AWS_REGION="$B2_REGION"
+
+          # ----------------------------------------------------------
+          # 3. 使用 SQLite Backup API 创建事务一致性快照
+          #
+          # 不直接上传 stock_analysis.db：
+          # DSA 默认使用 WAL，最新事务可能存在于 -wal 中。
+          # SQLite backup() 会生成一个独立、完整、可恢复的 DB。
+          # ----------------------------------------------------------
+          echo "📦 创建 SQLite 一致性快照..."
+
+          python - <<'PY'
+          import os
+          import sqlite3
+          import sys
+          import time
+
+          source_path = "data/stock_analysis.db"
+          snapshot_path = "data/stock_analysis.b2.snapshot.db"
+
+          if not os.path.exists(source_path):
+              print("❌ 源数据库不存在")
+              sys.exit(1)
+
+          if os.path.exists(snapshot_path):
+              os.remove(snapshot_path)
+
+          try:
+              source = sqlite3.connect(source_path, timeout=30)
+
+              # 尝试将 WAL 中已提交事务 checkpoint 回主库。
+              # 即使仍有少量 WAL 页，后面的 backup() 仍通过 SQLite
+              # 自身的一致性机制生成完整快照。
+              try:
+                  checkpoint = source.execute(
+                      "PRAGMA wal_checkpoint(FULL);"
+                  ).fetchone()
+                  print(f"ℹ️ WAL checkpoint: {checkpoint}")
+              except Exception as exc:
+                  print(
+                      "⚠️ WAL checkpoint 未完成，"
+                      f"将继续使用 SQLite Backup API: {exc}"
+                  )
+
+              destination = sqlite3.connect(snapshot_path)
+
+              source.backup(
+                  destination,
+                  pages=1000,
+                  sleep=0.1,
+              )
+
+              destination.close()
+              source.close()
+
+          except Exception as exc:
+              print(f"❌ SQLite Backup API 失败: {exc}")
+              sys.exit(1)
+
+          # ----------------------------------------------------------
+          # 完整性检查
+          # ----------------------------------------------------------
+          try:
+              check = sqlite3.connect(snapshot_path, timeout=30)
+              result = check.execute(
+                  "PRAGMA integrity_check;"
+              ).fetchone()
+              check.close()
+          except Exception as exc:
+              print(f"❌ 无法检查 SQLite 快照: {exc}")
+              sys.exit(1)
+
+          if not result or result[0] != "ok":
+              print(
+                  "❌ SQLite snapshot integrity_check 失败: "
+                  f"{result}"
+              )
+              sys.exit(1)
+
+          size = os.path.getsize(snapshot_path)
+          size_mb = size / 1024 / 1024
+
+          print("✅ SQLite snapshot integrity_check: ok")
+          print(f"✅ SQLite snapshot 大小: {size_mb:.2f} MB")
+
+          # 顺便读取基础数据库统计，仅用于日志诊断。
+          try:
+              conn = sqlite3.connect(snapshot_path)
+              tables = conn.execute(
+                  """
+                  SELECT name
+                  FROM sqlite_master
+                  WHERE type='table'
+                  ORDER BY name
+                  """
+              ).fetchall()
+              conn.close()
+
+              print(f"✅ SQLite 表数量: {len(tables)}")
+          except Exception as exc:
+              print(f"⚠️ 无法读取表统计，但不影响上传: {exc}")
+
+          print(
+              "✅ SQLite 一致性快照创建完成: "
+              f"{snapshot_path}"
+          )
+          PY
+
+          # ----------------------------------------------------------
+          # 4. 上传到 B2
+          #
+          # 使用相同 Object Key。
+          # B2 的文件版本机制可以保留旧版本（取决于 Bucket 的
+          # Lifecycle 设置）。
+          # ----------------------------------------------------------
+          echo "⬆️ 上传 SQLite 快照到 Backblaze B2..."
+
+          aws s3 cp \
+            "data/stock_analysis.b2.snapshot.db" \
+            "s3://${B2_BUCKET_NAME}/${B2_DB_KEY}" \
+            --endpoint-url "${B2_S3_ENDPOINT}" \
+            --only-show-errors
+
+          # ----------------------------------------------------------
+          # 5. 上传完成后再次确认远端对象存在
+          # ----------------------------------------------------------
+          echo "🔍 验证 B2 远端数据库..."
+
+          aws s3api head-object \
+            --bucket "${B2_BUCKET_NAME}" \
+            --key "${B2_DB_KEY}" \
+            --endpoint-url "${B2_S3_ENDPOINT}" \
+            >/dev/null
+
+          LOCAL_SIZE="$(
+            stat -c%s data/stock_analysis.b2.snapshot.db
+          )"
+
+          echo "✅ Backblaze B2 数据库上传成功"
+          echo "✅ Object: s3://${B2_BUCKET_NAME}/${B2_DB_KEY}"
+          echo "✅ Size: ${LOCAL_SIZE} bytes"
+          echo "=========================================="
       
       - name: 上传分析报告
         uses: actions/upload-artifact@v6
