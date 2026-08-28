@@ -85,18 +85,12 @@ class LiteLLMGenerationBackend(GenerationBackend):
         if not api_key:
             raise RuntimeError("GCP_GEMINI_API_KEY is not configured")
 
-        # Google currently documents standard Agent Platform API-key auth using
-        # GOOGLE_API_KEY + GOOGLE_GENAI_USE_ENTERPRISE=True. GitHub Actions sets
-        # these explicitly; the assignments below also keep local/manual runs
-        # compatible when only the project-specific aliases are configured.
+        # Google currently documents the standard Agent Platform API-key path as
+        # GOOGLE_API_KEY + GOOGLE_GENAI_USE_ENTERPRISE=True, without
+        # GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION. Supplying project/location
+        # would switch the SDK toward ADC auth and override the API-key path.
         os.environ.setdefault("GOOGLE_API_KEY", api_key)
         os.environ.setdefault("GOOGLE_GENAI_USE_ENTERPRISE", "True")
-
-        project = (os.getenv("GCP_PROJECT_ID") or "").strip()
-        location = (os.getenv("GCP_AGENT_LOCATION") or "global").strip() or "global"
-        if project:
-            os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project)
-        os.environ.setdefault("GOOGLE_CLOUD_LOCATION", location)
 
         model = (
             (os.getenv("GCP_AGENT_MODEL") or "gemini-3.5-flash").strip()
@@ -111,7 +105,10 @@ class LiteLLMGenerationBackend(GenerationBackend):
         from google import genai
         from google.genai import types
 
-        logger.info("[GCP Agent Platform] Priority 0 调用 %s", model)
+        logger.info(
+            "[GCP Agent Platform] Priority 0 调用 %s (auth=google_cloud_api_key)",
+            model,
+        )
         client = genai.Client(
             http_options=types.HttpOptions(api_version="v1"),
         )
