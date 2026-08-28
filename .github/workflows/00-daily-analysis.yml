@@ -273,15 +273,11 @@ jobs:
           # Priority 0: 失败后自动继续现有 LiteLLM Gemini -> GLM fallback 链
           GCP_AGENT_ENABLED: ${{ vars.GCP_AGENT_ENABLED || 'false' }}
           GCP_AGENT_MODEL: ${{ vars.GCP_AGENT_MODEL || 'gemini-3.5-flash' }}
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_AGENT_LOCATION: ${{ vars.GCP_AGENT_LOCATION || 'global' }}
           GCP_GEMINI_API_KEY: ${{ secrets.GCP_GEMINI_API_KEY }}
 
-          # google-genai 官方 Agent Platform 标准 API-key 环境变量
+          # google-genai 官方标准 API-key 路径：仅 GOOGLE_API_KEY + ENTERPRISE 开关
           GOOGLE_API_KEY: ${{ secrets.GCP_GEMINI_API_KEY }}
           GOOGLE_GENAI_USE_ENTERPRISE: ${{ vars.GCP_AGENT_ENABLED || 'false' }}
-          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
-          GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_AGENT_LOCATION || 'global' }}
 
           GENERATION_BACKEND: ${{ vars.GENERATION_BACKEND || secrets.GENERATION_BACKEND }}
           GENERATION_FALLBACK_BACKEND: ${{ vars.GENERATION_FALLBACK_BACKEND || secrets.GENERATION_FALLBACK_BACKEND || 'litellm' }}
