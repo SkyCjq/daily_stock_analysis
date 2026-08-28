@@ -4,7 +4,7 @@ on:
   # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
   schedule:
     - cron: '7 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
-  
+
   # 手动触发
   workflow_dispatch:
     inputs:
@@ -36,20 +36,20 @@ jobs:
     environment: STOCK_LIST
     # 添加超时限制，防止任务卡死
     timeout-minutes: ${{ fromJSON(vars.ANALYSIS_TIMEOUT_MINUTES || '30') }}
-    
+
     steps:
       - name: 随机延迟（避免固定时间访问）
         run: sleep $((RANDOM % 60))  # 随机延迟0-60秒启动
-      
+
       - name: 检出代码
         uses: actions/checkout@v5
-      
+
       - name: 设置 Python 环境
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
-      
+
       - name: 安装依赖
         run: |
           pip install --upgrade pip
@@ -253,7 +253,7 @@ jobs:
           fi
 
           echo "=========================================="
-          
+
       - name: 执行股票分析
         env:
           # ==========================================
@@ -269,6 +269,20 @@ jobs:
           # ==========================================
           # AI 配置
           # ==========================================
+          # Google Cloud Gemini Enterprise Agent Platform
+          # Priority 0: 失败后自动继续现有 LiteLLM Gemini -> GLM fallback 链
+          GCP_AGENT_ENABLED: ${{ vars.GCP_AGENT_ENABLED || 'false' }}
+          GCP_AGENT_MODEL: ${{ vars.GCP_AGENT_MODEL || 'gemini-3.5-flash' }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_AGENT_LOCATION: ${{ vars.GCP_AGENT_LOCATION || 'global' }}
+          GCP_GEMINI_API_KEY: ${{ secrets.GCP_GEMINI_API_KEY }}
+
+          # google-genai 官方 Agent Platform 标准 API-key 环境变量
+          GOOGLE_API_KEY: ${{ secrets.GCP_GEMINI_API_KEY }}
+          GOOGLE_GENAI_USE_ENTERPRISE: ${{ vars.GCP_AGENT_ENABLED || 'false' }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_AGENT_LOCATION || 'global' }}
+
           GENERATION_BACKEND: ${{ vars.GENERATION_BACKEND || secrets.GENERATION_BACKEND }}
           GENERATION_FALLBACK_BACKEND: ${{ vars.GENERATION_FALLBACK_BACKEND || secrets.GENERATION_FALLBACK_BACKEND || 'litellm' }}
           GENERATION_BACKEND_TIMEOUT_SECONDS: ${{ vars.GENERATION_BACKEND_TIMEOUT_SECONDS || secrets.GENERATION_BACKEND_TIMEOUT_SECONDS }}
@@ -308,7 +322,7 @@ jobs:
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
           GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
           GEMINI_REQUEST_DELAY: '3.0'
-          
+
           # AIHubMix（优先于 OPENAI_API_KEY，自动适配 base_url，推荐国内用户）
           AIHUBMIX_KEY: ${{ secrets.AIHUBMIX_KEY }}
 
@@ -321,7 +335,7 @@ jobs:
           # DeepSeek
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_API_KEYS: ${{ secrets.DEEPSEEK_API_KEYS }}
-          
+
           # Anthropic / Claude
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_API_KEYS: ${{ secrets.ANTHROPIC_API_KEYS }}
@@ -500,7 +514,7 @@ jobs:
           LONGBRIDGE_ENABLE_OVERNIGHT: ${{ vars.LONGBRIDGE_ENABLE_OVERNIGHT || secrets.LONGBRIDGE_ENABLE_OVERNIGHT }}
           LONGBRIDGE_PUSH_CANDLESTICK_MODE: ${{ vars.LONGBRIDGE_PUSH_CANDLESTICK_MODE || secrets.LONGBRIDGE_PUSH_CANDLESTICK_MODE }}
           LONGBRIDGE_PRINT_QUOTE_PACKAGES: ${{ vars.LONGBRIDGE_PRINT_QUOTE_PACKAGES || secrets.LONGBRIDGE_PRINT_QUOTE_PACKAGES }}
-          
+
           # ==========================================
           # 搜索服务
           # ==========================================
@@ -515,15 +529,15 @@ jobs:
           BRAVE_API_KEYS: ${{ secrets.BRAVE_API_KEYS }}
           SEARXNG_BASE_URLS: ${{ vars.SEARXNG_BASE_URLS || secrets.SEARXNG_BASE_URLS }}
           SEARXNG_PUBLIC_INSTANCES_ENABLED: ${{ vars.SEARXNG_PUBLIC_INSTANCES_ENABLED || secrets.SEARXNG_PUBLIC_INSTANCES_ENABLED }}
-          
+
           # ==========================================
           # 通知渠道（可同时配置多个，全部推送）
           # ==========================================
-          
+
           # 方式一：企业微信 Webhook
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
           WECHAT_MSG_TYPE: ${{ vars.WECHAT_MSG_TYPE || secrets.WECHAT_MSG_TYPE || 'markdown' }}
-          
+
           # 方式二：飞书 Webhook
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
@@ -535,13 +549,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
-          
+
           # 方式四：邮件
           EMAIL_SENDER: ${{ vars.EMAIL_SENDER || secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVERS: ${{ vars.EMAIL_RECEIVERS || secrets.EMAIL_RECEIVERS }}
           EMAIL_SENDER_NAME: ${{ vars.EMAIL_SENDER_NAME || secrets.EMAIL_SENDER_NAME || 'daily_stock_analysis股票分析助手' }}
-          
+
           # 方式五：Pushover
           PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
           PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
@@ -553,22 +567,22 @@ jobs:
           # 方式五扩展：Gotify
           GOTIFY_URL: ${{ secrets.GOTIFY_URL }}
           GOTIFY_TOKEN: ${{ secrets.GOTIFY_TOKEN }}
-          
+
           # 方式六：PushPlus ⬅️ 新增！
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           PUSHPLUS_TOPIC: ${{ vars.PUSHPLUS_TOPIC || secrets.PUSHPLUS_TOPIC }}
-          
+
           # 方式七：自定义 Webhook（钉钉、Bark、自建服务等）
           CUSTOM_WEBHOOK_URLS: ${{ secrets.CUSTOM_WEBHOOK_URLS }}
           CUSTOM_WEBHOOK_BEARER_TOKEN: ${{ secrets.CUSTOM_WEBHOOK_BEARER_TOKEN }}
           CUSTOM_WEBHOOK_BODY_TEMPLATE: ${{ vars.CUSTOM_WEBHOOK_BODY_TEMPLATE || secrets.CUSTOM_WEBHOOK_BODY_TEMPLATE }}
           WEBHOOK_VERIFY_SSL: ${{ vars.WEBHOOK_VERIFY_SSL || secrets.WEBHOOK_VERIFY_SSL || 'true' }}
-          
+
           # 方式八：Discord
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_MAIN_CHANNEL_ID: ${{ secrets.DISCORD_MAIN_CHANNEL_ID }}
-          
+
           # 方式九：飞书云文档
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
@@ -608,7 +622,7 @@ jobs:
           STOCK_LIST_CONFIG: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'us' }}
           MARKET_REVIEW_COLOR_SCHEME: ${{ vars.MARKET_REVIEW_COLOR_SCHEME || secrets.MARKET_REVIEW_COLOR_SCHEME || 'green_up' }}
-          
+
           # ==========================================
           # 运行配置 ⬅️ 新增！
           # ==========================================
@@ -619,7 +633,7 @@ jobs:
           MARKET_REVIEW_ENABLED: ${{ vars.MARKET_REVIEW_ENABLED || secrets.MARKET_REVIEW_ENABLED || 'true' }}
           ANALYSIS_DELAY: ${{ vars.ANALYSIS_DELAY || secrets.ANALYSIS_DELAY || '0' }}
           TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
-          
+
           # ==========================================
           # 系统配置
           # ==========================================
@@ -631,7 +645,7 @@ jobs:
           # 可选值: tencent, akshare_sina, efinance, akshare_em, tickflow, tushare
           # 如果有 TickFlow 或 Tushare Pro，可按权限把 tickflow / tushare 放在更靠前位置
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
-          
+
         run: |
           # 解析自选股配置：
           # 1. Repository/Environment secrets 或 Repository variables（STOCK_LIST_CONFIG）
@@ -655,7 +669,7 @@ jobs:
 
           # 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
-          
+
           echo "=========================================="
           echo "🚀 A股自选股智能分析系统"
           echo "=========================================="
@@ -675,6 +689,7 @@ jobs:
           else
             echo "  LiteLLM: ❌ 未配置"
           fi
+          echo "  GCP Agent Platform: $([ "${GCP_AGENT_ENABLED,,}" = "true" ] && [ -n "$GCP_GEMINI_API_KEY" ] && echo '✅ 已启用' || echo '⚪ 未启用/未配置')"
           echo "  Gemini API Key: $([ -n "$GEMINI_API_KEY" ] && echo '✅ 已配置' || echo '❌ 未配置')"
           echo "  DeepSeek Key:   $([ -n "$DEEPSEEK_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  Anspire Key:    $([ -n "$ANSPIRE_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
@@ -726,7 +741,7 @@ jobs:
           echo "  Slack: $(([ -n "$SLACK_WEBHOOK_URL" ] || ([ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL_ID" ])) && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "=========================================="
           echo ""
-          
+
           # 构建命令行参数
           FORCE_RUN_ARG=""
           if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
@@ -949,7 +964,7 @@ jobs:
           echo "✅ Object: s3://${B2_BUCKET_NAME}/${B2_DB_KEY}"
           echo "✅ Size: ${LOCAL_SIZE} bytes"
           echo "=========================================="
-      
+
       - name: 上传分析报告
         uses: actions/upload-artifact@v6
         if: always()
@@ -959,7 +974,7 @@ jobs:
             reports/
             logs/
           retention-days: 30
-      
+
       - name: 显示运行结果
         if: always()
         run: |
